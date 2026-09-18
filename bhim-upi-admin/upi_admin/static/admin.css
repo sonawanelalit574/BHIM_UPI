@@ -1,0 +1,68 @@
+:root {
+  --bg: #0f1412;
+  --ink: #e8eee9;
+  --muted: #8b9a90;
+  --line: #2a3530;
+  --accent: #3dba7a;
+  --panel: #171e1b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 24px 28px 64px;
+}
+.top { display: flex; justify-content: space-between; gap: 16px; align-items: end; }
+h1 { margin: 0; font-size: 22px; font-weight: 600; }
+.kicker { margin: 0 0 4px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px; }
+.lede { color: var(--muted); max-width: 72ch; }
+label { color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+input, button, code {
+  font: inherit;
+}
+input {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 20px 0;
+}
+.stats article {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+}
+.stats span { display: block; color: var(--muted); font-size: 12px; }
+.stats strong { font-size: 18px; font-weight: 600; }
+.tabs { display: flex; gap: 8px; margin: 8px 0 16px; }
+.tabs button, table button, .toolbar button, .pay button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.tabs button.on { border-color: var(--accent); color: var(--accent); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+code { font-size: 12px; }
+.err { color: #e07070; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+.pay { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.pay h2 { flex-basis: 100%; font-size: 16px; margin: 0; }
+select {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 6px 8px;
+  border-radius: 4px;
+}

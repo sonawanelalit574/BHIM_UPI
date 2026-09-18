@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BHIM UPI Control Plane</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="kicker">Simulation · not NPCI</p>
+      <h1>BHIM UPI administrative console</h1>
+    </div>
+    <label>Operator token
+      <input id="token" value="dev-admin" autocomplete="off">
+    </label>
+  </header>
+  <p class="lede">Slack-style isolated PSP adapters, Discord-style hot/cold ledger shards, and a control plane for freeze, circuit, reverse, settle, and archive.</p>
+  <section id="stats" class="stats"></section>
+  <nav class="tabs">
+    <button type="button" data-tab="psps" class="on">PSPs</button>
+    <button type="button" data-tab="vpas">VPAs</button>
+    <button type="button" data-tab="txns">Transactions</button>
+    <button type="button" data-tab="shards">Shards</button>
+    <button type="button" data-tab="audit">Audit</button>
+  </nav>
+  <section id="panel"></section>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const token = () => $("token").value.trim();
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, {
+        ...opts,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Token": token(),
+          "X-Admin-Actor": "ops@upi",
+          ...(opts.headers || {}),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || res.status);
+      return data;
+    }
+
+    function money(n) {
+      return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(n);
+    }
+
+    function formData(form) {
+      return Object.fromEntries(new FormData(form).entries());
+    }
+
+    async function refreshStats() {
+      const d = await api("/admin/api/dashboard");
+      $("stats").innerHTML = [
+        ["PSPs", d.psps],
+        ["VPAs", d.vpas],
+        ["Txns", d.transactions],
+        ["Success", d.success],
+        ["Failed", d.failed],
+        ["Volume", money(d.volume_inr)],
+        ["Open circuits", d.open_circuits.join(", ") || "none"],
+        ["Coalesce saved", d.coalesce_saved],
+      ].map(([k, v]) => `<article><span>${k}</span><strong>${v}</strong></article>`).join("");
+    }
+
+    async function act(path, body) {
+      try {
+        await api(path, { method: "POST", body: JSON.stringify(body) });
+        await refreshStats();
+        const on = document.querySelector(".tabs button.on");
+        await show(on.dataset.tab);
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function addPsp(ev) {
+      ev.preventDefault();
+      const body = formData(ev.target);
+      await act("/admin/api/psps", body);
+      return false;
+    }
+
+    async function addVpa(ev) {
+      ev.preventDefault();
+      const body = formData(ev.target);
+      await act("/admin/api/vpas", body);
+      return false;
+    }
+
+    async function simPay(ev) {
+      ev.preventDefault();
+      const body = formData(ev.target);
+      body.amount_inr = Number(body.amount_inr);
+      await act("/admin/api/pay", body);
+      return false;
+    }
+
+    const views = {
+      async psps() {
+        const rows = await api("/admin/api/psps");
+        return `<form class="pay" onsubmit="return addPsp(event)">
+            <h2>Add values</h2>
+            <input name="id" placeholder="psp id" required>
+            <input name="name" placeholder="display name" required>
+            <input name="handle" placeholder="@handle" required>
+            <input name="bank_id" value="sbi" placeholder="bank id">
+            <button type="submit">Add PSP</button>
+          </form>
+          <table><thead><tr><th>PSP</th><th>Handle</th><th>Circuit</th><th>Drain</th><th>OK/Fail</th><th></th></tr></thead><tbody>` +
+          rows.map(p => `<tr>
+            <td>${p.name} <code>${p.id}</code></td>
+            <td>${p.handle}</td>
+            <td>${p.circuit}</td>
+            <td>${p.draining}</td>
+            <td>${p.success_24h} / ${p.failed_24h}</td>
+            <td>
+              <button type="button" onclick="act('/admin/api/psps/${p.id}/circuit', {state:'open'})">Trip</button>
+              <button type="button" onclick="act('/admin/api/psps/${p.id}/circuit', {state:'closed'})">Close</button>
+              <button type="button" onclick="act('/admin/api/psps/${p.id}/drain', {draining:${p.draining ? "false" : "true"}})">${p.draining ? "Undrain" : "Drain"}</button>
+              <button type="button" onclick="act('/admin/api/psps/${p.id}/settle', {})">Settle</button>
+            </td>
+          </tr>`).join("") + `</tbody></table>`;
+      },
+      async vpas() {
+        const rows = await api("/admin/api/vpas");
+        const psps = await api("/admin/api/psps");
+        const options = psps.map(p => `<option value="${p.id}">${p.id}</option>`).join("");
+        return `<form class="pay" onsubmit="return addVpa(event)">
+            <h2>Add values</h2>
+            <input name="address" placeholder="name@handle" required>
+            <input name="owner_name" placeholder="owner" required>
+            <select name="psp_id">${options}</select>
+            <input name="account_ref" placeholder="account ref" value="****1001">
+            <button type="submit">Add VPA</button>
+          </form>
+          <table><thead><tr><th>VPA</th><th>Owner</th><th>PSP</th><th>Frozen</th><th></th></tr></thead><tbody>` +
+          rows.map(v => `<tr>
+            <td><code>${v.address}</code></td>
+            <td>${v.owner_name}</td>
+            <td>${v.psp_id}</td>
+            <td>${v.frozen}</td>
+            <td>
+              <button type="button" onclick="act('/admin/api/vpas/state', {address:'${v.address}', frozen:true, reason:'ops'})">Freeze</button>
+              <button type="button" onclick="act('/admin/api/vpas/state', {address:'${v.address}', frozen:false, reason:'cleared'})">Unfreeze</button>
+            </td>
+          </tr>`).join("") + `</tbody></table>
+          <form class="pay" onsubmit="return simPay(event)">
+            <h2>Simulate collect/pay</h2>
+            <input name="payer_vpa" value="lalit@upi" required>
+            <input name="payee_vpa" value="merchant@ybl" required>
+            <input name="amount_inr" type="number" min="0.01" step="0.01" value="25" required>
+            <input name="note" value="admin simulate">
+            <button type="submit">Send</button>
+          </form>`;
+      },
+      async txns() {
+        const q = $("txnq") ? $("txnq").value : "";
+        const path = q ? `/admin/api/transactions?utr=${encodeURIComponent(q)}` : "/admin/api/transactions";
+        let rows;
+        try { rows = await api(path); } catch (e) { rows = []; }
+        return `<div class="toolbar"><input id="txnq" placeholder="UTR…" value="${q}"><button type="button" onclick="show('txns')">Lookup</button></div>
+          <table><thead><tr><th>UTR</th><th>Payer</th><th>Payee</th><th>INR</th><th>Status</th><th>Shard</th><th></th></tr></thead><tbody>` +
+          rows.map(t => `<tr>
+            <td><code>${t.utr}</code></td>
+            <td>${t.payer_vpa}</td>
+            <td>${t.payee_vpa}</td>
+            <td>${t.amount_inr}</td>
+            <td>${t.status}</td>
+            <td>${t.shard} / ${t.bucket}</td>
+            <td>
+              <button type="button" onclick="act('/admin/api/transactions/${t.utr}/reverse', {reason:'ops reverse'})">Reverse</button>
+              <button type="button" onclick="act('/admin/api/transactions/${t.utr}/dispute', {reason:'claim'})">Dispute</button>
+            </td>
+          </tr>`).join("") + `</tbody></table>`;
+      },
+      async shards() {
+        const d = await api("/admin/api/shards");
+        return `<p>Request coalescing: ${d.coalesce.hits} lookups, ${d.coalesce.saved} merged.</p>
+          <button type="button" onclick="act('/admin/api/ledger/archive', {})">Archive cold buckets</button>
+          <table><thead><tr><th>Shard</th><th>Hot</th><th>Cold</th><th>Hot flag</th></tr></thead><tbody>` +
+          d.shards.map(s => `<tr><td>${s.shard}</td><td>${s.hot_txns}</td><td>${s.cold_txns}</td><td>${s.hot}</td></tr>`).join("") +
+          `</tbody></table>
+          <h2>Hot partitions</h2>
+          <table><thead><tr><th>Bucket</th><th>Shard</th><th>Txns</th><th>Sample VPA</th></tr></thead><tbody>` +
+          (d.hot_partitions.length
+            ? d.hot_partitions.map(p => `<tr><td>${p.bucket}</td><td>${p.shard}</td><td>${p.txns}</td><td>${p.sample_vpa}</td></tr>`).join("")
+            : `<tr><td colspan="4">No hot partitions over threshold</td></tr>`) +
+          `</tbody></table>`;
+      },
+      async audit() {
+        const rows = await api("/admin/api/audit");
+        if (!rows.length) return `<p>No operator mutations yet.</p>`;
+        return `<table><thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody>` +
+          rows.map(e => `<tr><td>${e.at}</td><td>${e.actor}</td><td>${e.action}</td><td>${e.target}</td><td>${e.detail}</td></tr>`).join("") +
+          `</tbody></table>`;
+      },
+    };
+
+    async function show(name) {
+      document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+      try {
+        $("panel").innerHTML = await views[name]();
+      } catch (e) {
+        $("panel").innerHTML = `<p class="err">${e.message}</p>`;
+      }
+    }
+
+    window.act = act;
+    window.show = show;
+    window.addPsp = addPsp;
+    window.addVpa = addVpa;
+    window.simPay = simPay;
+
+    document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => show(b.dataset.tab)));
+    refreshStats().then(() => show("psps")).catch((e) => { $("panel").innerHTML = `<p class="err">${e.message}</p>`; });
+  </script>
+</body>
+</html>
